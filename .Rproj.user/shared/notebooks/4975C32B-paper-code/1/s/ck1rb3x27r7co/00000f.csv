@@ -1,5 +1,0 @@
-"0","PCfit <- prcomp(X, scale. = TRUE)"
-"0","PC <- PCfit$x"
-"0","pcDT <- as.data.table(as.data.frame(summary(PCfit)$importance),"
-"0","                      keep.rownames = 'var') |> "
-"0","  melt(id.vars = 'var', variable.name = 'PC')"
