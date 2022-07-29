@@ -1,0 +1,644 @@
+---
+title: "Precipitation reconstruction at Chitral"
+author: "Hung Nguyen"
+date: "2022-05-14"
+output:
+  rmdformats::readthedown
+    toc: 4
+  html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction and Preparations
+
+This document details the process of producing the results presented in **Increasing Drought Risks amidst Projected Flood Intensification in the Kabul River Basin (Afghanistan and Pakistan) by Khan et al. (2022).
+
+To reproduce the results, please do the following:
+
+-   This code requires R 4.1.0 and above.
+-   Download the code repository from the GitHub repo and extract the downloaded `.zip` file to your working folder.
+-   Open `chitral-precip.Rproj` in RStudio (**It's important to open this first so that the file path is loaded properly**).
+-   Install and load the following packages if you don't already have them. For package `ldsr`, please use the development version which can be installed from GitHub with
+
+```{r, eval=FALSE}
+remotes::install_github('ntthung/ldsr')
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(dplR)       # Tree ring data processing
+library(ldsr)       # Tree ring data processing
+library(ggplot2)    # Plotting
+library(cowplot)    # Plotting
+library(patchwork)  # Plotting
+library(ggprism)    # Plotting
+library(data.table) # Data handling 
+```
+
+-   Open `paper-code.Rmd`, which is the source code for this document.
+-   Follow the written details below and run the code chunks one by one.
+-   The main reconstruction step with `mbr` should be run on a computing clusters. It still works on a desktop or laptop, but will take much longer, so you may need to change the genetic algorithm settings (more explanations later).
+
+For quick access to the final results please see the `.csv` files in `results/`. This folder is organized by the tributaries.
+
+The code utilities to support the main code are stored in the folder `R/`. We need to load them first before running the main code.
+
+
+```{r}
+source('R/init.R')
+source('R/input-selection-functions.R')
+source('R/correlation_functions.R')
+source('R/drought_analysis_functions.R')
+theme_set(theme_prism(base_size = 14, base_fontface = 'plain', base_line_size = 0.2))
+```
+
+
+
+# Read data
+
+```{r read-data, warning=FALSE, message=FALSE}
+QmWide <- fread('data/chitral-monthly-Q.csv')
+Qm <- melt(QmWide, id.var = 'year', variable.name = 'month', variable.factor = FALSE, value.name = 'Qm'
+         )[, month := match(month, month.abb)
+         ][order(year, month)]
+TmWide <- fread('data/chitral-monthly-T.csv')
+Tm <- melt(TmWide, id.var = 'year', variable.name = 'month2', variable.factor = TRUE, value.name = 'Tm'
+         )[, month := as.integer(month2)
+         ][order(year, month)]
+PmWide <- fread('data/chitral-monthly-P.csv')
+Pm <- melt(PmWide, id.var = 'year', variable.name = 'month2', variable.factor = TRUE, value.name = 'Pm'
+         )[, month := as.integer(month2)
+         ][order(year, month)]
+
+crnRaw <- lapplyrbind(
+  list.files('data/raw/tree-rings/', '.tabs'),
+  function(fn) {
+    dt <- fread(glue('data/raw/tree-rings/{fn}'))
+    dt[, site := substr(fn, 1, nchar(fn) - 7)]
+  })
+setkey(crnRaw, site)
+sssOut <- fread('data/sss.csv', key = 'site')
+crn <- merge(crnRaw, sssOut, by = c('site', 'year'))
+
+firstYear <- crn[sss > 0.6][, .N, by = year][N >= 4, first(year)]
+# firstYear <- 1518
+lastYear <- 2018
+crnWide <- crn[year %in% firstYear:lastYear, dcast(.SD, year ~ site, value.var = c('res'))]
+
+X <- crnWide[, -'year'] |> 
+  as.matrix() |> 
+  imputePCA(ncp = 6) |> 
+  {\(x) x$completeObs}() 
+PC <- prcomp(X, scale. = TRUE)$x
+
+clim <- Pm |> 
+  merge(Tm, by = c('year', 'month')) |> 
+  merge(Qm, by = c('year', 'month')) |>  
+  melt(id.vars = c('year', 'month'))
+```
+
+```{r}
+Pa <- Pm[, .(Pa = sum(Pm)), by = year]
+ggplot(Pa) +
+  geom_line(aes(year, Pa))
+```
+
+# Chronology and SSS plots
+
+```{r, fig.width=7, fig.height=6}
+sf <- 2.2
+p <- ggplot(sssOut) +
+  geom_hline(aes(yintercept = 1, linetype = 'Mean', color = 'Mean')) +
+  # geom_hline(aes(yintercept = 0.85 * sf, 
+                 # color = 'SSS = 0.85', linetype = 'SSS = 0.85')) +
+  geom_hline(aes(yintercept = 0.6 * sf,
+                 color = 'SSS = 0.6', linetype = 'SSS = 0.6')) +
+  geom_line(aes(year, sss * sf, 
+                col = 'Subsample signal strength', 
+                linetype = 'Subsample signal strength'), size = 0.5) +
+  geom_line(aes(year, res, 
+                col = 'Ring width index', 
+                linetype = 'Ring width index'), crn) +
+  facet_wrap(~site, ncol = 2) +
+  scale_x_continuous(
+    name = NULL,
+    breaks = seq(1300, 2000, 100),
+    minor_breaks = seq(1300, 2000, 50),
+    guide = guide_prism_minor(),
+    expand = c(0, 0)) +
+  scale_y_continuous(
+
+    sec.axis = sec_axis(~ . / sf, name = 'Subsample signal strength',
+                        breaks = seq(0, 1, 0.25)),
+    expand = c(0, 0)) +
+  scale_color_manual(
+    name = NULL,
+    breaks = c('Ring width index', 'Mean',
+               'Subsample signal strength', 'SSS = 0.6'),
+    values = c('steelblue', 'black', 'darkorange', 'black')) +
+  scale_linetype_manual(
+    name = NULL,
+    breaks = c('Ring width index', 'Mean',
+               'Subsample signal strength', 'SSS = 0.6'),
+    values = c(1, 1, 1, 2)) +
+  guides(color = guide_legend(override.aes = list(size = 0.50))) +
+  theme(
+    strip.background = element_rect('gray95', NA),
+    legend.position = c(0.75, 0.1),
+    legend.key.width = unit(1, 'cm'),
+    panel.border = element_rect(NA, 'black', 0.2),
+    axis.ticks.y.right = element_line(color = 'darkorange'),
+    axis.text.y.right = element_text(color = 'darkorange', size = 9),
+    axis.title.y.right = element_text(color = 'darkorange', size = 9),
+    axis.line.y.right = element_line(color = 'darkorange'),
+    axis.ticks.y.left = element_line(color = 'steelblue'),
+    axis.text.y.left = element_text(color = 'steelblue', size = 9),
+    axis.title.y.left = element_text(color = 'steelblue', size = 9),
+    axis.line.y.left = element_line(color = 'steelblue'))
+# ggsave('figures/crn_sss.png', p, width = 7, height = 6, dpi = 600)
+p
+```
+
+```{r}
+crnWide[, -'year'][, cor(.SD, use = 'pairwise.complete.obs')]
+```
+
+# Climate-growth relationship
+
+```{r infilling}
+Xraw <- as.matrix(crnWide[, -'year'])
+impModel <- imputePCA(Xraw, ncp = 6)
+Xfilled <- impModel$completeObs
+Xfitted <- impModel$fittedX
+colnames(Xfitted) <- colnames(Xfilled)
+```
+
+```{r}
+crnFitted <- as.data.table(as.data.frame(Xfitted))
+crnFitted[, year := 1517:2018]
+crnFittedLong <- melt(
+  crnFitted, id.vars = 'year', variable.name = 'site', value.name = 'rwi')
+crnMerge <- rbindlist(
+  list(Infilled = crnFittedLong, Original = crn[, .(site, year, rwi = res)]),
+  use.names = TRUE,
+  idcol = 'type')
+```
+
+```{r}
+ggplot(crnMerge[year >= 1517]) +
+  geom_line(aes(year, rwi, color = type)) +
+  facet_wrap(vars(site), ncol = 2, scales = 'free_y') +
+  scale_color_manual(values = c('darkorange', 'steelblue')) +
+  scale_x_continuous(breaks = seq(1500, 2000, 100)) +
+  labs(x = NULL, y = 'RWI [-]') +
+  panel_border('black', 0.2) +
+  theme(legend.position = c(0.6, 0.1))
+ggsave('figures/infilling.png', width = 7, height = 7)
+```
+
+```{r}
+treeYears <- crnWide$year
+
+# Current year
+# Merge TR in 1965-2018 with precipitation in 1965-2018
+instIndc <- which(treeYears %in% 1965:2018) 
+XYc <- cbind(Xfilled[instIndc, ], as.matrix(PmWide[, -'year'])) 
+
+# Tree rings and previous year precipitation
+# Merge TR in 1966-2018 with precipitation in 1965-2017
+instIndp <- which((treeYears - 1) %in% 1965:2017) # previous year streamflow
+XYp <- cbind(Xfilled[instIndp, ], as.matrix(PmWide[-.N, -'year']))
+
+# Tree rings and next year precipitation
+# Merge TR in 1963-2016 with precipitation in 1965-2018
+# instIndn <- which((treeYears + 1) %in% 1965:2018) # next year streamflow
+# XYn <- cbind(Xfilled[instIndn, ], as.matrix(PmWide[, -'year']))
+
+set.seed(2022)
+corDTc <- cor_boot(XYc, 1:7, 8:19, groupNames = c('site', 'month')) # current year
+corDTp <- cor_boot(XYp, 1:7, 8:19, groupNames = c('site', 'month')) # current year
+# corDTn <- cor_boot(XYn, 1:7, 8:19, groupNames = c('site', 'month')) # current year
+
+corDTc[, month := paste0(month, 'c')]
+corDTp[, month := paste0(month, 'p')]
+# corDTn[, month := paste0(month, 'n')]
+
+corDTPm <- rbind(corDTp, corDTc)
+corDTPm[, month := factor(month, c(paste0(month.abb, 'p'), paste0(month.abb, 'c')))]
+```
+
+```{r, fig.width=7, fig.height=6}
+ggplot(corDTPm) +
+  geom_linerange(
+    aes(x = month, ymin = low, ymax = high, alpha = signif), color = 'steelblue') +
+  geom_point(
+    aes(x = month, y = rho0, alpha = signif), color = 'steelblue') +
+  geom_hline(aes(yintercept = 0)) +
+  geom_vline(xintercept = 12.5) +
+  facet_wrap(vars(site), ncol = 2) +
+  scale_x_discrete(name = NULL, labels = monthLab) +
+  scale_y_continuous(name = 'Correlation [-]', 
+                     breaks = c(-0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6)) +
+  scale_alpha_manual(
+    values = c(0.25, 1), labels = c('Not significant', 'Significant')) +
+  theme(
+    legend.position = c(0.75, 0.1),
+    axis.text.x = ggtext::element_markdown()) +
+  panel_border('black', 0.2)
+# ggsave('figures/correlations.png', width = 7, height = 6, dpi = 600)
+```
+
+# Climatology
+
+```{r}
+p1 <- ggplot(Pm) +
+  geom_boxplot(aes(month2, Pm), fill = 'steelblue', alpha = 0.5) +
+  labs(x = NULL, y = 'Precipitation [mm]', tag = 'c)') +
+  scale_x_discrete(labels = \(x) substr(x, 1, 1)) +
+  scale_y_continuous(guide = guide_prism_minor()) +
+  panel_border('black', 0.2) 
+
+p2 <- ggplot(Tm) +
+  geom_boxplot(aes(month2, Tm), fill = 'darkorange', alpha = 0.5) +
+  labs(x = NULL, y = 'Temperature [\u00b0C]') +
+  scale_x_discrete(labels = \(x) substr(x, 1, 1)) +
+  scale_y_continuous(guide = guide_prism_minor()) +
+  panel_border('black', 0.2)
+
+p1 + p2
+
+# ggsave('figures/climatology.png', width = 7, height = 2.5)
+```
+
+# September to August precipitation reconstruction
+
+## Instrumental period
+
+```{r}
+Pm[, year2 := fifelse(month %in% 9:12, year + 1, year)]
+PSepAug <- Pm[, .(Qa = sum(Pm)), by = .(year = year2)][year %in% 1966:lastYear]
+instInd <- which(firstYear:lastYear %in% PSepAug$year)
+PCfit <- prcomp(X, scale. = TRUE)
+PC <- PCfit$x
+```
+
+```{r}
+pcDT <- as.data.table(as.data.frame(summary(PCfit)$importance),
+                      keep.rownames = 'var') |> 
+  melt(id.vars = 'var', variable.name = 'PC')
+```
+
+```{r}
+p1 <- ggplot(pcDT[var == 'Standard deviation']) +
+  geom_col(aes(PC, value), color = 'black', fill = 'gray95') +
+  geom_hline(yintercept = 1, size = 0.8) +
+  scale_y_continuous(expand = expansion(add = c(0, 0.01)),
+                     limits = c(0, 2)) +
+  labs(x = NULL, y = 'Eigenvalue [-]', tag = 'a)') +
+  theme(
+    panel.grid.major.y = element_line('gray'),
+    panel.ontop = TRUE,
+    axis.ticks = element_blank(),
+    axis.line = element_blank())
+p2 <- ggplot() +
+  geom_col(
+    aes(PC, value * 100), 
+    pcDT[var == 'Proportion of Variance'],
+    fill = 'steelblue', color = 'black', alpha = 0.8) +
+  geom_line(
+    aes(PC, value * 100, group = 1),
+    pcDT[var == 'Cumulative Proportion'],
+    color = 'firebrick', size = 0.8) +
+  geom_point(
+    aes(PC, value * 100),
+    pcDT[var == 'Cumulative Proportion'],
+    color = 'firebrick', size = 1.6) +
+  labs(x = NULL, y = 'Proportion of variance [%]', tag = 'b)') +
+  scale_y_continuous(expand = expansion(add = c(0, 1))) +
+  theme(
+    panel.grid.major.y = element_line('gray'),
+    panel.ontop = TRUE,
+    axis.ticks = element_blank(),
+    axis.line = element_blank())
+
+p1 + p2
+ggsave('figures/pca_output.png', width = 7, height = 4)
+```
+
+```{r, eval=FALSE}
+input_selection(PC[instInd, 1:6], PSepAug$Qa, method = 'FWDselect', nvmax = 4)
+input_selection(PC[instInd, 1:6], PSepAug$Qa, method = 'leaps forward', nvmax = 4)
+input_selection(PC[instInd, 1:6], PSepAug$Qa, method = 'leaps backward', nvmax = 4)
+input_selection(PC[instInd, 1:6], PSepAug$Qa, method = 'VSURF', nvmax = 4)
+```
+
+```{r}
+sv <- c(1, 2)
+sPC <- as.data.table(PC[, sv, drop = FALSE])
+lmFit <- PCR_reconstruction(PSepAug, sPC, firstYear, transform = 'none')
+set.seed(42)
+cvFolds <- make_Z(PSepAug$Qa, frac = 0.25, contiguous = TRUE)
+lmCV <- cvPCR(PSepAug, sPC, firstYear, transform = 'none',
+              Z = cvFolds, use.robust.mean = FALSE)
+round(lmCV$metrics, 2)
+```
+
+```{r}
+recFinal <- lmFit$rec
+recFinal[, lp20 := dplR::pass.filt(Q, 20, 'low')]
+recFinal[, lp50 := dplR::pass.filt(Q, 50, 'low')]
+bcFit <- fitQmap(
+  PSepAug$Qa,
+  recFinal[year %in% PSepAug$year, Q],
+  'RQUANT',
+  wet.day = FALSE)
+recFinal[, Qbc := doQmap(Q, bcFit)]
+```
+
+```{r, fig.width=7, fig.height=4}
+p1 <- ggplot(recFinal[year %in% PSepAug$year]) +
+  geom_line(aes(year, Q, colour = 'Reconstruction', linetype = 'Reconstruction'), size = 0.4) +
+  geom_line(aes(year, Qbc, colour = 'Bias-corrected', linetype = 'Bias-corrected'), size = 0.4) +
+  geom_line(aes(year, Qa, colour = 'Observation', linetype = 'Observation'), 
+            PSepAug, size = 0.4) +
+  scale_colour_manual(
+    name = NULL, 
+    values = c('Observation' = 'gray30',
+               'Reconstruction' = 'steelblue',
+               'Bias-corrected' = 'darkorange')) +
+  scale_linetype_manual(
+    name = NULL, 
+    values = c('Observation' = 1, 
+               'Reconstruction' = 1,
+               'Bias-corrected' = 2)) +
+  scale_x_continuous(
+    minor_breaks = seq(1965, 2020, 5),
+    limits = c(1966, 2018), 
+    guide = guide_prism_offset_minor()) +
+  scale_y_continuous(
+    minor_breaks = seq(200, 850, 50),
+    breaks = seq(200, 850, 100),
+    limits = c(200, 850),
+    guide = guide_prism_offset_minor()) +
+  labs(x = 'Year', y = 'Precipitation [mm]', tag = 'a)') +
+  theme(
+    plot.margin = margin(r = 10),
+    legend.box.margin = margin(),
+    legend.margin = margin(),
+    legend.key.width = unit(2, 'cm'),
+    legend.position = 'top') 
+p2 <- ggplot() +
+  stat_density(aes(y = Q, colour = 'Reconstruction', linetype = 'Reconstruction'), 
+               recFinal[year %in% PSepAug$year], geom = 'line', bw = 60, size = 0.4) +
+  stat_density(aes(y = Qbc, colour = 'Bias-corrected', linetype = 'Bias-corrected'), 
+               recFinal[year %in% PSepAug$year], geom = 'line', bw = 60, size = 0.4) +
+  stat_density(aes(y = Qa, colour = 'Observation', linetype = 'Observation'), 
+               PSepAug, geom = 'line', bw = 60, size = 0.4) +
+  scale_colour_manual(
+    name = NULL, 
+    values = c('Observation' = 'gray30',
+               'Reconstruction' = 'steelblue',
+               'Bias-corrected' = 'darkorange')) +
+  scale_linetype_manual(
+    name = NULL, 
+    values = c('Observation' = 1, 
+               'Reconstruction' = 1,
+               'Bias-corrected' = 2)) +
+  scale_x_continuous(guide = guide_prism_offset()) +
+  scale_y_continuous(
+    minor_breaks = seq(200, 850, 50),
+    breaks = seq(200, 850, 100),
+    limits = c(200, 850),
+    guide = guide_prism_offset_minor()) +
+  labs(y = NULL, x = 'Density', colour = NULL, tag = 'b)') +
+  theme(
+    axis.text.y = element_blank(),
+    legend.box.margin = margin(),
+    legend.margin = margin(),
+    legend.key.width = unit(2, 'cm'),
+    legend.position = 'top') +
+  theme(legend.position = 'top')
+
+layout <- '
+CCC
+AAB
+AAB
+AAB
+AAB
+AAB
+AAB
+'
+
+p1 + p2 + guide_area() +
+  plot_layout(design = layout, guides = 'collect')
+
+# ggsave('figures/inst-period.png', width = 7, height = 4, dpi = 600)
+```
+
+```{r}
+scores <- melt(lmCV$metrics.dist[, .(R2, RE, CE)], 
+               measure.vars = 1:3,
+               variable.name = 'metric')
+ggplot(scores) +
+  geom_boxplot(aes(metric, value), fill = 'grey95') +
+  geom_jitter(aes(metric, value, color = metric), width = 0.25) +
+  scale_color_brewer(palette = 'Set2') +
+  scale_x_discrete(
+    name = NULL,
+    guide = guide_prism_bracket(),
+    labels = c('R\u00b2', 'RE', 'CE')) +
+  scale_y_continuous(
+    name = 'Metric value [-]',
+    limits = c(0.25, 0.85),
+    breaks = seq(0.2, 0.9, 0.1),
+    minor_breaks = seq(0.25, 0.85, 0.05),
+    guide = guide_prism_offset_minor()) +
+  theme(legend.position = 'none')
+# ggsave('figures/metric_dist.png', width = 7, height = 4, dpi = 600)
+```
+
+```{r, fig.width=14, fig.height=7}
+ggplot(recFinal) +
+  geom_line(aes(year, Q, colour = 'Reconstruction')) +
+  geom_line(aes(year, lp20, colour = '20-year low-pass filter')) +
+  geom_line(aes(year, lp50, colour = '50-year low-pass filter'), size = 1) +
+  geom_hline(yintercept = mean(recFinal$Q), colour = 'firebrick') +
+  scale_colour_manual(
+    name = NULL, 
+    values = c(
+      'Reconstruction' = 'grey', 
+      '20-year low-pass filter' = 'black',
+      '50-year low-pass filter' = 'darkorange')) +
+  scale_x_continuous(breaks = seq(1500, 2000, 25), labels = skip_label(2)) +
+  scale_y_continuous(breaks = seq(200, 800, 50), labels = skip_label(2)) +
+  theme(
+    legend.key.width = unit(2, 'cm'),
+    legend.position = 'top') +
+  labs(x = 'Year', y = 'Precipitation [mm]')
+```
+
+```{r, fig.width=14, fig.height=6}
+ggplot(recFinal) +
+  geom_line(aes(year, Q, colour = 'Reconstruction', linetype = 'Reconstruction')) +
+  geom_line(aes(year, Qbc, colour = 'Bias corrected', linetype = 'Bias corrected')) +
+  geom_hline(yintercept = mean(recFinal$Q), colour = 'firebrick') +
+  scale_colour_manual(
+    name = NULL, 
+    values = c('darkorange', 'black')) +
+  scale_linetype_manual(name = NULL, values = c(2, 1)) +
+  theme(
+    legend.key.width = unit(2, 'cm'),
+    legend.position = 'top') +
+  labs(x = 'Year', y = 'Precipitation [mm]')
+```
+
+# Trends and droughts
+
+```{r}
+recFinal[, rolMax := frollapply(Qbc, 50, max, align = 'right')]
+recFinal[, rolMin := frollapply(Qbc, 50, min, align = 'right')]
+recFinal[, rolMed := frollapply(Qbc, 50, median, align = 'right')]
+recFinal[, period := fcase(
+  year %in% 1517:1767, 1,
+  default = 2)]
+densCals <- recFinal[, {
+  d <- density(Qbc, cut = 0, bw = 45)
+  list(x = d$x, y = d$y / max(d$y) * 1.5)
+}, by = period]
+
+medians <- recFinal[, {
+  d <- density(Qbc, cut = 0, bw = 45)
+  m <- median(Qbc)
+  y <- approx(d$x, d$y, m)$y
+  list(x = m, y = y / max(d$y) * 1.5)
+}, by = period]
+
+recFinal[, dP := Qbc - mean(Qbc),
+       ][, type := classify_events(dP)
+       ][, dp10 := pass.filt(dP, 10)]
+droughts <- get_timing(recFinal$dP, recFinal$type)[type == 'drought']
+droughts[, ':='(yearStart = recFinal[start, year],
+                period = recFinal[start, period],
+                yearFinal = recFinal[final, year])]
+worstDroughts <- droughts[order(peak)][1:3]
+```
+
+```{r}
+recFinal[, ks.test(.SD[period == 1, Qbc], .SD[period == 2, Qbc], exact = TRUE)]
+```
+
+```{r}
+recFinal[!is.na(rolMax), tfpwmk(rolMax)] |> round(6)
+recFinal[!is.na(rolMin), tfpwmk(rolMin)] |> round(6)
+recFinal[!is.na(rolMed), tfpwmk(rolMed)] |> round(6)
+```
+
+```{r, fig.width=7, fig.height=6, message=FALSE}
+p1 <- ggplot(recFinal) +
+  geom_line(aes(year, Qbc, color = 'Annual')) +
+  labs(x = NULL, y = 'P [mm]') +
+  geom_line(aes(year, rolMax, colour = '50-yr max'), na.rm = TRUE, size = 0.4) +
+  geom_line(aes(year, rolMin, colour = '50-yr min'), na.rm = TRUE, size = 0.4) +
+  geom_line(aes(year, rolMed, colour = '50-yr median'), na.rm = TRUE, size = 0.4) +
+  geom_smooth(aes(year, rolMax, colour = '50-yr max'), size = 0.6,
+              formula = 'y ~ x', method = 'lm', na.rm = TRUE, fill = NA) +
+  geom_smooth(aes(year, rolMin, colour = '50-yr min'), size = 0.6,
+              formula = 'y ~ x', method = 'lm', na.rm = TRUE, fill = NA) +
+  geom_smooth(aes(year, rolMed, colour = '50-yr median'), size= 0.6,
+              formula = 'y ~ x', method = 'lm', na.rm = TRUE, fill = NA) +
+  scale_x_continuous(
+    expand = c(0, 0),
+    minor_breaks = seq(1500, 2025, 25),
+    limits = c(1500, 2025),
+    guide = guide_prism_offset_minor()) +
+  scale_y_continuous(
+    minor_breaks = seq(200, 900, 50),
+    breaks = seq(200, 900, 100),
+    limits = c(200, 900),
+    labels = skip_label(2),
+    guide = guide_prism_offset_minor()) +
+  labs(x = NULL, y = 'Precipitation [mm]', colour = NULL, tag = 'a)') +
+  scale_color_manual(values = c(RColorBrewer::brewer.pal(3, 'Set2'), 'gray')) +
+  theme(
+    legend.key.width = unit(0.5, 'cm'),
+    legend.position = 'top')
+
+p2 <- ggplot(densCals) +
+  geom_ribbon(aes(x, ymin = period, ymax = y + period, group = factor(period),
+                  fill = factor(period)), 
+              alpha = 0.5) +
+  geom_line(aes(x, y + period, group = factor(period))) +
+  geom_linerange(aes(x, ymin = period, ymax = period + y), medians, colour = 'firebrick') +
+  scale_fill_manual(
+    labels = c('1517-1717', '1718-2018'),
+    values = wesanderson::wes_palette('Royal1', 4)[c(1, 4)]) +
+  scale_x_continuous(
+    guide = guide_prism_offset_minor(),
+    breaks = seq(200, 900, 100), 
+    minor_breaks = seq(200, 900, 20)) +
+  scale_y_continuous(
+    expand = c(0, 0),
+    breaks = c(1.5, 2.5),
+    labels = c('1517-1717', '            1718-2018')) +
+  labs(x = 'Precipitation [mm]', y = NULL, tag = 'b)') +
+  theme(
+    legend.position = 'none',
+    axis.line.y = element_blank(),
+    axis.text.y.left = element_text(angle = 90, hjust = 0.5),
+    axis.ticks.y = element_blank())
+
+p3 <- ggplot(recFinal) +
+  geom_rect(
+    aes(xmin = yearStart, xmax = yearFinal, ymin = -Inf, ymax = Inf),
+    worstDroughts,
+    fill = 'magenta4', alpha = 0.1) +
+  geom_col(aes(year, dP, fill = dP)) +
+  scale_fill_distiller(
+    palette = 'BrBG', limits = abs_range(recFinal$dP),
+    guide = guide_none(),
+    direction = 1) +
+  scale_color_manual(values = 'black') +
+  scale_x_continuous(
+    expand = c(0, 0),
+    minor_breaks = seq(1500, 2025, 25),
+    limits = c(1500, 2025),
+    guide = guide_prism_offset_minor()) +
+  scale_y_continuous(
+    breaks = seq(-300, 400, 100),
+    minor_breaks = seq(-300, 400, 50),
+    guide = guide_prism_offset_minor()) +
+  labs(x = NULL, y = 'Precipitation anomaly [mm]', tag = 'c)') +
+  theme(
+    legend.position = 'top')
+
+p4 <- ggplot(droughts) +
+  geom_point(aes(dur, peak, color = as.character(period)), alpha = 0.6) +
+  geom_text(
+    aes(dur, peak, label = paste(yearStart, yearFinal, sep = '-')), 
+    worstDroughts,
+    size = 2, hjust = 0.8, nudge_y = -15) +
+  # scale_x_continuous(
+  #   breaks = seq(2, 20, 2),
+  #   guide = guide_prism_offset_minor()) +
+  # scale_y_continuous(
+  #   breaks = seq(-300, 0, 50),
+  #   limits = c(-275, -25),
+  #   guide = guide_prism_offset_minor()) +
+  scale_color_manual(
+    labels = c('1517-1717', '1718-2018'),
+    values = wesanderson::wes_palette('Royal1', 4)[c(1, 4)]) +
+  labs(x = 'Drought duration [years]', y = 'Drought severity [mm]', tag = 'd)') +
+  theme(legend.position = 'top')
+
+p1 + p2 + p3 + p4 +
+  plot_layout(widths = c(1.5, 1))
+ggsave('figures/trend_and_drought.png', width = 7, height = 5)
+```
+
+```{r export, include=FALSE, eval=FALSE}
+recFinal[, period := NULL]
+setcolorder(recFinal, 'year')
+# fwrite(recFinal, 'results/sep-aug-precip-reconst.csv')
+```

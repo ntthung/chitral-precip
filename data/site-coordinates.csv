@@ -1,0 +1,10 @@
+code,name,site,species,lat,long,elevation,plot.lat,plot.long
+CGNP,Chitral Gol National Park,PGCG,Cedrus deodara,35.90666667,74.73833333,3030,35.90666667,74.73833333
+BUKA,Bumburat Kalash,CDBK,Cedrus deodara,35.68333333,71.635,2590,35.66,71.61
+BUKA,Bumburat Kalash,PGBK,Pinus gerardiana,35.68333333,71.635,2590,35.7,71.66
+ZIAR,Ziarat,CDZ,Cedrus deodara,35.35166667,71.8,2900,35.35166667,71.8
+LOWA,Lowari,PSLT,Picea smithiana,35.345,71.92833333,2660,35.32,71.9
+LOWA,Lowari,CDI,Cedrus deodara,35.345,71.92833333,2660,35.37,71.94
+NURI,Nuristan,CDNA,Cedrus deodara,35.38557,71.324442,2480,35.38557,71.324442
+DANG,Dangam,,Picea smithiana,35.00033333,71.53333333,2529,35.00033333,71.53333333
+NUBA,,,Picea smithiana,35.08944444,71.76416667,2560,35.08944444,71.76416667

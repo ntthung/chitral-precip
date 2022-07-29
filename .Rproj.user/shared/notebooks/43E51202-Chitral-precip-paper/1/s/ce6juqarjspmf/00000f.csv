@@ -1,0 +1,7 @@
+"0","library(dplR)       # Tree ring data processing"
+"0","library(ldsr)       # Tree ring data processing"
+"0","library(ggplot2)    # Plotting"
+"0","library(cowplot)    # Plotting"
+"0","library(patchwork)  # Plotting"
+"0","library(ggprism)    # Plotting"
+"0","library(data.table) # Data handling "

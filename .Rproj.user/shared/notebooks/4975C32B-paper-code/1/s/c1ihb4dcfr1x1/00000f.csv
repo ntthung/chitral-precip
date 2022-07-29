@@ -1,0 +1,3 @@
+"0","recFinal[, period := NULL]"
+"0","setcolorder(recFinal, 'year')"
+"0","fwrite(recFinal, 'results/chitral-sep-aug-precip-reconst.csv')"
