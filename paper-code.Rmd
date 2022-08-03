@@ -172,7 +172,7 @@ ggplot(sssOut) +
 
 ## Climate-growth relationship
 
-First we infill the tree ring data
+First we infill the tree ring data.
 
 ```{r infilling}
 X <- crnWide[, -'year'] |> 
@@ -209,7 +209,7 @@ ggplot(crnMerge[year >= 1517]) +
   theme(legend.position = c(0.6, 0.1))
 ```
 
-Calculate bootstrapped correlations
+Calculate bootstrapped correlations.
 
 ```{r}
 treeYears <- crnWide$year
@@ -326,8 +326,9 @@ DT <- cbind(PC[450:502, 1:3], Qa = PSepAug$Qa) |> as.data.frame()
 step(lm(Qa ~ ., DT), direction = 'backward')
 ```
 
+**Build final model**
+
 ```{r}
-# Build final model
 sPC <- as.data.table(PC[, 1:2])
 lmFit <- PCR_reconstruction(PSepAug, sPC, firstYear, transform = 'none')
 set.seed(42)
@@ -336,7 +337,7 @@ lmCV <- cvPCR(PSepAug, sPC, firstYear, transform = 'none',
               Z = cvFolds, use.robust.mean = FALSE)
 ```
 
-Performance scores
+**Performance scores**
 
 ```{r}
 round(lmCV$metrics[, 1:3], 2)
@@ -364,7 +365,7 @@ ggplot(scores) +
   theme(legend.position = 'none')
 ```
 
-Final reconstruction with bias correction
+Final reconstruction with bias correction.
 
 ```{r}
 recFinal <- lmFit$rec
@@ -460,7 +461,7 @@ p1 + p2 + guide_area() +
 
 # Trend and drought analyses
 
-Calculate rolling statistics and extract drought events
+Calculate rolling statistics and extract drought events.
 
 ```{r}
 alignType <- 'right'
@@ -492,7 +493,7 @@ droughts[, ':='(yearStart = recFinal[start, year],
 worstDroughts <- droughts[order(peak)][1:3]
 ```
 
-Mann-Kendall trend test with trend-free prewhitening
+Mann-Kendall trend test with trend-free pre-whitening.
 
 ```{r}
 recFinal[!is.na(rolMax), tfpwmk(rolMax)] |> round(6)
@@ -613,7 +614,7 @@ p1 + p2 + p3 + p4 +
   plot_layout(widths = c(1.5, 1))
 ```
 
-Export the reconstruction
+Export the reconstruction.
 
 ```{r export, eval=FALSE}
 recFinal[, period := NULL]
