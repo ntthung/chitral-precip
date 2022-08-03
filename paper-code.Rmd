@@ -1,12 +1,10 @@
 ---
-title: "Code for *Increasing Drought Risks amidst Projected Flood Intensification in the Kabul River Basin (Afghanistan and Pakistan) by Khan et al. (2022)*"
+title: "Code for *Tree-Ring Evidence of Increasing Drought Risks amidst Projected Flood Intensification in the Kabul River Basin (Afghanistan and Pakistan)* by Khan et al. (2022)"
 author: "Hung Nguyen"
 date: "2022-05-14"
 output: 
-  rmdformats::readthedown: 
-    highlight: tango
-  pdf_document:
-    highlight: tango
+  rmdformats::readthedown: default 
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -15,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Introduction and Preparations
 
-This document details the process of producing the results presented in **Increasing Drought Risks amidst Projected Flood Intensification in the Kabul River Basin (Afghanistan and Pakistan) by Khan et al. (2022).
+This document details the process of producing the results presented in **Tree-Ring Evidence of Increasing Drought Risks amidst Projected Flood Intensification in the Kabul River Basin (Afghanistan and Pakistan)** by Khan et al. (2022).
 
 To reproduce the results, please do the following:
 
@@ -39,16 +37,22 @@ library(ggplot2)    # Plotting
 library(cowplot)    # Plotting
 library(patchwork)  # Plotting
 library(ggprism)    # Plotting
+library(ggnewscale) # Plotting
 theme_set(theme_prism(base_size = 10, base_fontface = 'plain', base_line_size = 0.2))
 ```
 
 -   Open `paper-code.Rmd`, which is the source code for this document.
 -   Follow the written details below and run the code chunks one by one.
 
+This R Markdown is set to render both HTML and PDF outputs. To do so, please run
+
+```{r, eval=FALSE}
+rmarkdown::render('paper-code.Rmd', output_format = 'all', output_options = list(hightlight = 'tango'))
+```
+
 For quick access to the final results please see the `.csv` file in `results/`. 
 
 The code utilities to support the main code are stored in the folder `R/`. We need to load them first before running the main code.
-
 
 ```{r}
 source('R/init.R')
@@ -454,9 +458,10 @@ p1 + p2 + guide_area() +
 Calculate rolling statistics and extract drought events
 
 ```{r}
-recFinal[, rolMax := frollapply(Qbc, 50, max, align = 'right')]
-recFinal[, rolMin := frollapply(Qbc, 50, min, align = 'right')]
-recFinal[, rolMed := frollapply(Qbc, 50, median, align = 'right')]
+alignType <- 'right'
+recFinal[, rolMax := frollapply(Qbc, 50, max, align = alignType)]
+recFinal[, rolMin := frollapply(Qbc, 50, min, align = alignType)]
+recFinal[, rolMed := frollapply(Qbc, 50, median, align = alignType)]
 recFinal[, period := fcase(
   year %in% 1517:1767, 1,
   default = 2)]
@@ -492,13 +497,13 @@ recFinal[!is.na(rolMed), tfpwmk(rolMed)] |> round(6)
 
 **Figure 4**
 
-```{r, fig.width=8, fig.height=5, message=FALSE}
+```{r, fig.width=8, fig.height=6, message=FALSE}
 p1 <- ggplot(recFinal) +
-  geom_line(aes(year, Qbc, color = 'Annual')) +
   labs(x = NULL, y = 'P [mm]') +
-  geom_line(aes(year, rolMax, colour = '50-yr max'), na.rm = TRUE, size = 0.4) +
-  geom_line(aes(year, rolMin, colour = '50-yr min'), na.rm = TRUE, size = 0.4) +
-  geom_line(aes(year, rolMed, colour = '50-yr median'), na.rm = TRUE, size = 0.4) +
+  geom_line(aes(year, rolMax, colour = '50-yr max'), na.rm = TRUE, size = 0.4, alpha = 0.5) +
+  geom_line(aes(year, rolMin, colour = '50-yr min'), na.rm = TRUE, size = 0.4, alpha = 0.5) +
+  geom_line(aes(year, rolMed, colour = '50-yr median'), na.rm = TRUE, size = 0.4, alpha = 1) +
+  geom_line(aes(year, Qbc, color = 'Annual')) +
   geom_smooth(aes(year, rolMax, colour = '50-yr max'), size = 0.6,
               formula = 'y ~ x', method = 'lm', na.rm = TRUE, fill = NA) +
   geom_smooth(aes(year, rolMin, colour = '50-yr min'), size = 0.6,
@@ -551,9 +556,19 @@ p3 <- ggplot(recFinal) +
     aes(xmin = yearStart, xmax = yearFinal, ymin = -Inf, ymax = Inf),
     worstDroughts,
     fill = 'magenta4', alpha = 0.1) +
-  geom_col(aes(year, dP, fill = dP)) +
+  geom_col(aes(year, dP, fill = dP), recFinal[dP > 0]) +
   scale_fill_distiller(
-    palette = 'BrBG', limits = abs_range(recFinal$dP),
+    palette = 'BrBG',
+    limits = abs_range(recFinal$dP),
+    # limits = abs_range(recFinal$dP),
+    guide = guide_none(),
+    direction = 1) +
+  ggnewscale::new_scale_fill() +
+  geom_col(aes(year, dP, fill = dP), recFinal[dP < 0]) +
+  scale_fill_distiller(
+    palette = 'BrBG', 
+    # limits = abs_range(recFinal$dP),
+    limits = c(min(recFinal$dP), -min(recFinal$dP)),
     guide = guide_none(),
     direction = 1) +
   scale_color_manual(values = 'black') +
@@ -576,13 +591,13 @@ p4 <- ggplot(droughts) +
     aes(dur, peak, label = paste(yearStart, yearFinal, sep = '-')), 
     worstDroughts,
     size = 2, hjust = 0.8, nudge_y = -15) +
-  # scale_x_continuous(
-  #   breaks = seq(2, 20, 2),
-  #   guide = guide_prism_offset_minor()) +
-  # scale_y_continuous(
-  #   breaks = seq(-300, 0, 50),
-  #   limits = c(-275, -25),
-  #   guide = guide_prism_offset_minor()) +
+  scale_x_continuous(
+    breaks = seq(2, 20, 2),
+    guide = guide_prism_offset_minor()) +
+  scale_y_continuous(
+    breaks = seq(-300, 0, 50),
+    limits = c(-275, -25),
+    guide = guide_prism_offset_minor()) +
   scale_color_manual(
     labels = c('1517-1717', '1718-2018'),
     values = wesanderson::wes_palette('Royal1', 4)[c(1, 4)]) +
