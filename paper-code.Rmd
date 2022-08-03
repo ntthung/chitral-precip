@@ -56,7 +56,6 @@ The code utilities to support the main code are stored in the folder `R/`. We ne
 
 ```{r}
 source('R/init.R')
-source('R/input-selection-functions.R')
 source('R/correlation_functions.R')
 source('R/drought_analysis_functions.R')
 ```
@@ -322,8 +321,14 @@ Pm[, year2 := fifelse(month %in% 9:12, year + 1, year)]
 PSepAug <- Pm[, .(Qa = sum(Pm)), by = .(year = year2)][year %in% 1966:lastYear]
 instInd <- which(firstYear:lastYear %in% PSepAug$year)
 
-sv <- c(1, 2)
-sPC <- as.data.table(PC[, sv, drop = FALSE])
+# Stepwise linear regression
+DT <- cbind(PC[450:502, 1:3], Qa = PSepAug$Qa) |> as.data.frame()
+step(lm(Qa ~ ., DT), direction = 'backward')
+```
+
+```{r}
+# Build final model
+sPC <- as.data.table(PC[, 1:2])
 lmFit <- PCR_reconstruction(PSepAug, sPC, firstYear, transform = 'none')
 set.seed(42)
 cvFolds <- make_Z(PSepAug$Qa, frac = 0.25, contiguous = TRUE)
@@ -334,7 +339,7 @@ lmCV <- cvPCR(PSepAug, sPC, firstYear, transform = 'none',
 Performance scores
 
 ```{r}
-round(lmCV$metrics, 2)
+round(lmCV$metrics[, 1:3], 2)
 ```
 **Figure S4 - score distribution**
 
